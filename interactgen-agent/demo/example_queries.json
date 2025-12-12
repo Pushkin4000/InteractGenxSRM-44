@@ -1,0 +1,22 @@
+[
+  {
+    "url": "https://www.google.com",
+    "query": "Search for 'artificial intelligence' and click the first result"
+  },
+  {
+    "url": "https://www.wikipedia.org",
+    "query": "Search for 'Machine Learning' and read the summary"
+  },
+  {
+    "url": "https://www.amazon.com",
+    "query": "Find laptops under $1000"
+  },
+  {
+    "url": "https://news.ycombinator.com",
+    "query": "Click on the top story"
+  },
+  {
+    "url": "https://www.github.com",
+    "query": "Search for 'web automation' repositories"
+  }
+]

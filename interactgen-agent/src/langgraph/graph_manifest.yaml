@@ -1,0 +1,47 @@
+nodes:
+  - name: Planner
+    type: llm_function
+    entry: src.planner.planner_agent:plan_with_groq
+    description: Convert natural language queries to semantic automation steps
+  
+  - name: Scraper
+    type: function
+    entry: src.scraper.fast_snapshot:snapshot
+    description: Generate DOM snapshot of target webpage
+  
+  - name: Selector
+    type: function
+    entry: src.selector.selector:select_candidates_hybrid
+    description: Map semantic targets to ranked element selectors
+  
+  - name: Executor
+    type: function
+    entry: src.executor.executor:execute_step
+    description: Execute automation steps with validation
+
+edges:
+  - from: START
+    to: Scraper
+    condition: snapshot_missing
+  
+  - from: Scraper
+    to: Planner
+  
+  - from: Planner
+    to: Selector
+  
+  - from: Selector
+    to: Executor
+  
+  - from: Executor
+    to: Planner
+    condition: execution_failed_and_retries_remaining
+  
+  - from: Executor
+    to: END
+    condition: all_steps_complete
+
+config:
+  max_retries: 2
+  snapshot_cache_ttl: 3600
+  selector_strategy: hybrid

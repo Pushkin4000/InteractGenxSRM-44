@@ -1,0 +1,27 @@
+# Core dependencies
+playwright>=1.40.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# LLM and AI
+groq>=0.4.0
+
+# Computer Vision for selector  
+opencv-python>=4.8.0
+pillow
+pytesseract>=0.3.0
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+python-multipart>=0.0.6
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+python-levenshtein>=0.21.0
+
+# Optional (for future LangGraph integration)
+# langgraph==0.0.1

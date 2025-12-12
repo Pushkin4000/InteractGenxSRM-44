@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InteractGen - AI Web Automation</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Left Panel: Browser View -->
+        <div class="browser-panel">
+            <div class="browser-header">
+                <div class="browser-controls">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <div class="url-bar">
+                    <span class="lock-icon">🔒</span>
+                    <input type="text" id="url-display" readonly value="Enter URL in chatbot to start" />
+                </div>
+            </div>
+            <div class="browser-content">
+                <iframe id="browser-iframe" src="about:blank"></iframe>
+                <div class="browser-overlay" id="browser-overlay">
+                    <div class="overlay-content">
+                        <div class="robot-icon">🤖</div>
+                        <h2>Ready to Automate</h2>
+                        <p>Enter a website URL and your query in the chatbot panel to see the automation in action!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Chatbot + Tasks -->
+        <div class="chat-panel">
+            <!-- Header -->
+            <div class="chat-header">
+                <h1>🤖 InteractGen</h1>
+                <span class="status-indicator" id="status-indicator">● Ready</span>
+            </div>
+
+            <!-- Input Section -->
+            <div class="input-section">
+                <div class="input-group">
+                    <label>🌐 Website URL</label>
+                    <input type="url" id="url-input" placeholder="https://example.com" />
+                </div>
+                <div class="input-group">
+                    <label>💬 What do you want to do?</label>
+                    <textarea id="query-input"
+                        placeholder="e.g., Search for 'machine learning' and click the first result"
+                        rows="2"></textarea>
+                </div>
+                <button id="send-btn" class="send-btn">
+                    <span class="btn-icon">▶</span> Run Automation
+                </button>
+            </div>
+
+            <!-- Task Progress -->
+            <div class="task-section" id="task-section">
+                <h3>📋 Task Progress</h3>
+                <div class="task-list" id="task-list">
+                    <!-- Tasks will be dynamically added here -->
+                    <div class="empty-tasks">
+                        <p>No tasks yet. Start an automation to see progress here.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages Log -->
+            <div class="messages-section">
+                <h3>📝 Activity Log</h3>
+                <div class="messages" id="messages">
+                    <div class="message system">
+                        Welcome! Enter a URL and describe what you want to automate.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Examples -->
+            <div class="examples-section">
+                <h4>Try these:</h4>
+                <div class="example-chips">
+                    <button class="chip" data-url="https://www.google.com" data-query="Search for 'AI news'">Google
+                        Search</button>
+                    <button class="chip" data-url="https://www.wikipedia.org"
+                        data-query="Search for 'Machine Learning'">Wikipedia</button>
+                    <button class="chip" data-url="https://news.ycombinator.com" data-query="Click the top story">Hacker
+                        News</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
