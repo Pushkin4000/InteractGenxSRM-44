@@ -336,22 +336,52 @@ async def run_automation(session_id: str):
                         print(f"  [{session_id}] Ignoring premature 'done' (0 successful steps)")
                         next_step = {"action": "wait", "target": "", "value": "", "reason": "Too early"}
                 
-                # Loop detection: Check if we're repeating the same action
-                action_key = f"{next_step.get('action')}:{next_step.get('target', '')[:30]}"
-                seen_actions.append(action_key)
-                if len(seen_actions) > 3:
-                    seen_actions.pop(0)  # Keep only last 3
+
+                # === Loop Detection & State Tracking ===
+                import hashlib
                 
-                # If same action repeated 3 times, force a different action
-                if len(seen_actions) >= 3 and len(set(seen_actions)) == 1:
-                    print(f"  [{session_id}] ⚠️ LOOP DETECTED: Repeating same action '{action_key}'")
+                # Create a hash of the current state (based on nodes)
+                # We use node IDs which are already content-stable
+                node_ids = "".join(sorted([n.get('node_id', '') for n in current_dom.get('nodes', [])]))
+                state_hash = hashlib.md5(node_ids.encode()).hexdigest()[:8]
+                
+                # Check for repetition of (State + Action)
+                action_type = next_step.get('action')
+                target_desc = next_step.get('target', '')
+                current_action_key = f"{state_hash}|{action_type}|{target_desc}"
+                
+                seen_actions.append(current_action_key)
+                if len(seen_actions) > 5:
+                    seen_actions.pop(0)
+                
+                # Check if we are doing the exact same thing in the same state
+                if len(seen_actions) >= 2 and seen_actions[-1] == seen_actions[-2]:
+                    # Immediate repetition - might be a retry, but check count
+                    if len(seen_actions) >= 3 and seen_actions[-1] == seen_actions[-3]:
+                         print(f"  [{session_id}] ⚠️ LOOP DETECTED: Stuck in same state executing same action")
+                         await send_update(session_id, {
+                             "status": "warning",
+                             "message": "⚠️ Loop detected (same state & action). Trying to break..."
+                         })
+                         # Force a different action (scroll or wait)
+                         if action_type == 'scroll':
+                             next_step = {"action": "wait", "reason": "Breaking scroll loop"}
+                         else:
+                             next_step = {"action": "scroll", "target": "", "value": "down", "reason": "Breaking loop"}
+                         
+                         # Clear history to avoid immediate re-trigger
+                         seen_actions = []
+                
+                # Check for "Oscillation" (A -> B -> A -> B)
+                if len(seen_actions) >= 4 and seen_actions[-1] == seen_actions[-3] and seen_actions[-2] == seen_actions[-4]:
+                    print(f"  [{session_id}] ⚠️ OSCILLATION DETECTED: Switching between two states")
                     await send_update(session_id, {
                         "status": "warning",
-                        "message": f"⚠️ Detected loop - trying different approach"
+                        "message": "⚠️ Oscillation detected. Stopping current flow."
                     })
-                    # Force a scroll or wait to break the loop
-                    next_step = {"action": "scroll", "target": "", "value": "down"}
-                    seen_actions = []  # Reset
+                    next_step = {"action": "wait", "reason": "Breaking oscillation"}
+                    seen_actions = []
+
                 
                 # Handle wait action from planner (errors, rate limits, etc)
                 # REMOVED: continue statement was causing infinite loops
@@ -398,6 +428,29 @@ async def run_automation(session_id: str):
                 })
                 
                 result = await execute_step_async(page, next_step, current_dom)
+                
+                # === RETROACTIVE NO-OP DETECTION ===
+                # Check if state changed after execution
+                # We need to re-capture DOM (lightweight) or just use the next iteration's capture
+                # But to flag it NOW, we should do a quick check or defer the flag to history
+                # For simplicity/speed: We will let the NEXT iteration see the repetition via 'seen_actions'
+                # BUT for the Planner History, we want to explicitly say "State Unchanged"
+                
+                # Re-calculate hash of NEW state
+                # Note: This adds latency (another DOM extraction). 
+                # Optimization: Only do this for 'click' or 'type' actions that result in success
+                if result.get('ok') and action in ['click', 'type', 'submit']:
+                    try:
+                        new_dom = await extract_dom_fast(page)
+                        new_node_ids = "".join(sorted([n.get('node_id', '') for n in new_dom.get('nodes', [])]))
+                        new_hash = hashlib.md5(new_node_ids.encode()).hexdigest()[:8]
+                        
+                        if new_hash == state_hash:
+                            print(f"  [{session_id}] ⚠️ NO-OP DETECTED: Action succeeded but state unchanged")
+                            result['message'] += " [⚠️ WARNING: Page state did not change]"
+                            result['no_op'] = True
+                    except Exception as e:
+                        print(f"  [{session_id}] No-op check error: {e}")
                 
                 # Record result
                 executed_steps.append({"step": next_step, "result": result})

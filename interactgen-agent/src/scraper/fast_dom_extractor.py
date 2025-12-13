@@ -54,29 +54,41 @@ DOM_EXTRACTION_JS = r'''() => {
             
             // Get selector candidates
             const candidates = [];
+
+            // 1. Data Attributes (High reliability)
+            ['data-testid', 'data-test', 'data-cy', 'data-id'].forEach(attr => {
+                if (el.hasAttribute(attr)) {
+                    candidates.push({
+                        type: 'css',
+                        value: `[${attr}="${el.getAttribute(attr)}"]`,
+                        prov: 'data-attr',
+                        score: 0.95
+                    });
+                }
+            });
             
-            // aria-label selector
+            // 2. ID selector
+            if (el.id && !/\d{4,}/.test(el.id)) {
+                candidates.push({
+                    type: 'css',
+                    value: `#${el.id}`,
+                    prov: 'id',
+                    score: 0.9
+                });
+            }
+
+            // 3. Aria-label selector
             const ariaLabel = el.getAttribute('aria-label');
             if (ariaLabel) {
                 candidates.push({
                     type: 'css',
                     value: `[aria-label="${ariaLabel.replace(/"/g, '\\"')}"]`,
                     prov: 'aria',
-                    score: 0.9
-                });
-            }
-            
-            // ID selector
-            if (el.id && !/\d{4,}/.test(el.id)) {
-                candidates.push({
-                    type: 'css',
-                    value: `#${el.id}`,
-                    prov: 'id',
                     score: 0.85
                 });
             }
             
-            // Name attribute
+            // 4. Name attribute
             const name = el.getAttribute('name');
             if (name) {
                 candidates.push({
@@ -87,7 +99,7 @@ DOM_EXTRACTION_JS = r'''() => {
                 });
             }
             
-            // Role attribute
+            // 5. Role attribute
             const role = el.getAttribute('role');
             if (role) {
                 candidates.push({
@@ -97,9 +109,20 @@ DOM_EXTRACTION_JS = r'''() => {
                     score: 0.7
                 });
             }
+
+            // 6. Placeholder
+            const ph = el.getAttribute('placeholder');
+            if (ph) {
+                 candidates.push({
+                    type: 'css',
+                    value: `[placeholder="${ph.replace(/"/g, '\\"')}"]`,
+                    prov: 'placeholder',
+                    score: 0.75
+                });
+            }
             
-            // Text-based XPath (for buttons/links)
-            if (text && text.length < 50 && ['BUTTON', 'A', 'LABEL'].includes(el.tagName)) {
+            // 7. Text-based XPath (for buttons/links)
+            if (text && text.length < 50 && ['BUTTON', 'A', 'LABEL', 'SPAN', 'DIV'].includes(el.tagName)) {
                 candidates.push({
                     type: 'xpath',
                     value: `//${el.tagName.toLowerCase()}[normalize-space(text())="${text.replace(/"/g, '\\"')}"]`,
@@ -120,7 +143,8 @@ DOM_EXTRACTION_JS = r'''() => {
                     role: role || null,
                     type: el.getAttribute('type') || null,
                     placeholder: el.getAttribute('placeholder') || null,
-                    href: el.getAttribute('href') || null
+                    href: el.getAttribute('href') || null,
+                    'data-testid': el.getAttribute('data-testid') || null
                 },
                 xpath: xpath,
                 bounding_box: {
