@@ -8,6 +8,10 @@ import os
 import argparse
 from typing import List, Dict, Any
 from groq import Groq
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 # Few-shot examples for prompt
@@ -89,7 +93,7 @@ def plan_with_groq(query: str, url: str, snapshot_context: Dict = None, api_key:
         List of semantic step dictionaries
     """
     if api_key is None:
-        api_key = "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"
+        api_key = os.getenv("GROQ_API_KEY")
     
     if not api_key:
         raise ValueError("GROQ_API_KEY not set. Get your free key at https://console.groq.com")
@@ -157,6 +161,151 @@ def plan_with_groq(query: str, url: str, snapshot_context: Dict = None, api_key:
         raise ValueError(f"LLM returned invalid JSON: {e}")
     except Exception as e:
         raise ValueError(f"Error calling Groq API: {e}")
+
+
+# Compact single-step planning prompt
+SINGLE_STEP_SYSTEM_PROMPT = """Web automation planner. Return NEXT action as JSON only.
+
+Actions: click, type, scroll, wait, done
+Format: {"action": "click", "target": "search button", "value": ""}
+For typing: {"action": "type", "target": "email input field", "value": "user@example.com"}
+If done: {"action": "done", "reason": "..."}
+
+Rules:
+- ONE step per response
+- Use element descriptions from provided list
+- For "type" action, extract the value to type from the goal
+- Return ONLY JSON, no text"""
+
+
+def plan_next_step(query: str, url: str, current_dom: Dict, 
+                   executed_steps: List[Dict] = None, api_key: str = None) -> Dict[str, Any]:
+    """
+    Plan ONLY the next single step based on current DOM state.
+    
+    This enables real-time iterative execution:
+    1. Scrape current DOM
+    2. Plan next step
+    3. Execute step
+    4. Repeat until done
+    
+    Args:
+        query: User's natural language goal
+        url: Current page URL
+        current_dom: Current DOM snapshot with nodes
+        executed_steps: List of previously executed steps for context
+        api_key: Groq API key
+    
+    Returns:
+        Single step dict or {"action": "done"} when complete
+    """
+    if api_key is None:
+        api_key = os.getenv("GROQ_API_KEY")
+    
+    if not api_key:
+        raise ValueError("GROQ_API_KEY not set")
+    
+    client = Groq(api_key=api_key)
+    
+    # Build context about current page
+    elements_summary = []
+    
+    # Sort nodes by score/relevance if possible, or just scan all
+    # For now, we scan all nodes but limit the output list size
+    
+    # Filter for interactive or meaningful elements
+    candidates_list = []
+    interactive_tags = {'button', 'a', 'input', 'select', 'textarea', 'form', 'label'}
+    
+    for node in current_dom.get('nodes', []):
+        tag = node.get('tag', '')
+        if tag in ['script', 'style', 'meta', 'link', 'noscript', 'img', 'svg', 'path']:
+            continue
+            
+        text = (node.get('text') or '').strip()
+        aria = (node.get('aria_label') or '').strip()
+        attrs = node.get('attributes', {})
+        
+        # Skip empty non-interactive elements
+        if tag not in interactive_tags and not text and not aria:
+            continue
+            
+        # Build description
+        parts = [tag]
+        if aria:
+            parts.append(f"aria:{aria[:40]}")
+        elif text:
+            parts.append(f"'{text[:40]}'")
+        if attrs.get('name'):
+            parts.append(f"name:{attrs['name'][:30]}")
+        if attrs.get('placeholder'):
+            parts.append(f"ph:{attrs['placeholder'][:30]}")
+        if attrs.get('type'):
+            parts.append(f"type:{attrs['type']}")
+        
+        desc = " ".join(parts)
+        candidates_list.append(desc)
+    
+    # Use up to 50 elements to give LLM enough context
+    # (LLama 3.3 70B can handle this easily)
+    context_limit = 50
+    elements_str = "\n".join(candidates_list[:context_limit])
+    
+    # Build compact history context
+    history = ""
+    if executed_steps:
+        history = "\nHistory:\n"
+        recent = executed_steps[-5:]  # Last 5 steps
+        for s in recent:
+            action = s.get('step', {}).get('action', '?')
+            target = s.get('step', {}).get('target', '')[:20]
+            result = "OK" if s.get('result', {}).get('ok') else "FAIL"
+            history += f"- {action} '{target}' -> {result}\n"
+    
+    user_message = f"Goal:{query}\nURL:{url}\nEls:\n{elements_str}{history}\nNext (JSON, include 'value' if typing):"
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",  # Fast model
+            messages=[
+                {"role": "system", "content": SINGLE_STEP_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.1,  # Lower for faster, more deterministic responses
+            max_tokens=200,  # Reduced from 500 - single step doesn't need much
+            stream=False  # Explicitly disable streaming for faster response
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Parse JSON
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+        
+        step = json.loads(content)
+        
+        # Add step_id
+        step_num = len(executed_steps or []) + 1
+        step['step_id'] = f"s{step_num}"
+        
+        return step
+    
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse single step JSON: {content}")
+        # Don't return "done" on parse error - return a safe action instead
+        return {"action": "wait", "target": "", "value": "", "reason": f"Parse error: {str(e)[:30]}"}
+    except Exception as e:
+        error_str = str(e).lower()
+        print(f"Error in single step planning: {e}")
+        
+        # Check for rate limit errors
+        if 'rate limit' in error_str or '429' in error_str or 'quota' in error_str:
+            raise ValueError(f"API rate limit exceeded: {e}")  # Re-raise to be handled upstream
+        
+        # Don't return "done" on error - return a safe action instead
+        return {"action": "wait", "target": "", "value": "", "reason": f"Error: {str(e)[:30]}"}
 
 
 def main():

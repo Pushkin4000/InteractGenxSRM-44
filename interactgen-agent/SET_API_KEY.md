@@ -5,7 +5,7 @@
 Run this command in PowerShell before starting the chatbot:
 
 ```powershell
-$env:GROQ_API_KEY="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"
+$env:GROQ_API_KEY="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"
 ```
 
 Then start the chatbot in the same window:

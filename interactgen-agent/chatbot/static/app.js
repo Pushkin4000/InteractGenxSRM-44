@@ -12,6 +12,7 @@ const messages = document.getElementById('messages');
 const taskList = document.getElementById('task-list');
 const statusIndicator = document.getElementById('status-indicator');
 const browserIframe = document.getElementById('browser-iframe');
+const browserScreenshot = document.getElementById('browser-screenshot');
 const browserOverlay = document.getElementById('browser-overlay');
 const urlDisplay = document.getElementById('url-display');
 
@@ -65,18 +66,11 @@ async function startAutomation() {
     addTask('select', 'Finding elements', 'pending');
     addTask('execute', 'Executing actions', 'pending');
 
-    // Show iframe and update URL bar
+    // Show browser panel and update URL bar
     browserOverlay.classList.add('hidden');
     urlDisplay.value = url;
-
-    // Load URL in iframe (for preview - actual automation happens server-side)
-    try {
-        browserIframe.src = url;
-    } catch (e) {
-        // Some sites block iframe embedding
-        browserIframe.src = 'about:blank';
-        addMessage('system', 'Note: Site blocks embedding. Automation runs in background browser.');
-    }
+    browserScreenshot.style.display = 'none';
+    browserIframe.style.display = 'none';
 
     // Add user message
     addMessage('user', `🌐 ${url}\n💬 ${query}`);
@@ -127,10 +121,27 @@ function connectWebSocket(sessionId) {
 }
 
 function handleUpdate(message) {
+    if (message.type === 'session_data') {
+        // Initial session data
+        return;
+    }
+
     if (message.type !== 'update') return;
 
     const update = message.data;
     const status = update.status;
+
+    // Handle screenshots
+    if (status === 'screenshot' && update.screenshot) {
+        browserScreenshot.src = 'data:image/png;base64,' + update.screenshot;
+        browserScreenshot.style.display = 'block';
+        browserIframe.style.display = 'none';
+        browserOverlay.classList.add('hidden');
+        if (update.url) {
+            urlDisplay.value = update.url;
+        }
+        return;
+    }
 
     // Update tasks based on status
     switch (status) {
@@ -142,8 +153,24 @@ function handleUpdate(message) {
             updateTask('scrape', 'success', update.message);
             updateTask('plan', 'running', 'Analyzing query...');
             break;
+        case 'starting':
+        case 'navigating':
+            addMessage('agent', update.message || 'Starting...');
+            break;
+        case 'analyzing':
+        case 'analyzed':
+            updateTask('scrape', 'running', update.message || 'Analyzing page...');
+            addMessage('agent', update.message || 'Analyzing page...');
+            break;
         case 'planning':
-            updateTask('plan', 'running', 'Generating automation steps...');
+            updateTask('plan', 'running', 'Planning next step...');
+            addMessage('agent', '🤔 Planning next action...');
+            break;
+        case 'planned_step':
+            addMessage('agent', update.message || 'Step planned');
+            break;
+        case 'highlighting':
+            addMessage('agent', update.message || 'Highlighting element...');
             break;
         case 'planned':
             updateTask('plan', 'success', `Generated ${update.steps?.length || 0} steps`);
@@ -161,11 +188,20 @@ function handleUpdate(message) {
             updateTask('execute', 'running', 'Starting execution...');
             break;
         case 'executing':
-            updateTask('execute', 'running', 'Running automation...');
+            const execMsg = update.message || 'Executing step...';
+            const selectorInfo = update.selector ? `\nTarget via: ${update.selector}` : '';
+            updateTask('execute', 'running', execMsg);
+            addMessage('agent', execMsg + selectorInfo);
             break;
         case 'executing_step':
             updateTask('execute', 'running', update.message);
             addMessage('agent', `⚡ ${update.message}`);
+            break;
+        case 'step_success':
+            addMessage('success', update.message || 'Step succeeded');
+            break;
+        case 'step_failed':
+            addMessage('error', update.message || 'Step failed');
             break;
         case 'step_complete':
             if (update.result?.ok) {
@@ -173,6 +209,15 @@ function handleUpdate(message) {
             } else {
                 addMessage('error', `✗ ${update.result?.step_id} failed`);
             }
+            break;
+        case 'warning':
+            addMessage('error', update.message || 'Warning');
+            break;
+        case 'error':
+            addMessage('error', update.message || 'Error occurred');
+            break;
+        case 'done':
+            addMessage('success', update.message || 'Task done');
             break;
         case 'completed':
             updateTask('execute', 'success', 'All steps completed!');
