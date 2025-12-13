@@ -167,14 +167,15 @@ def plan_with_groq(query: str, url: str, snapshot_context: Dict = None, api_key:
 SINGLE_STEP_SYSTEM_PROMPT = """Web automation planner. Return NEXT action as JSON only.
 
 Actions: click, type, scroll, wait, done
-Format: {"action": "click", "target": "search button", "value": ""}
-For typing: {"action": "type", "target": "email input field", "value": "user@example.com"}
+Format: {"action": "click", "element_id": "12af3", "target": "search button", "value": ""}
+For typing: {"action": "type", "element_id": "b4d21", "target": "email input field", "value": "user@example.com"}
 If done: {"action": "done", "reason": "..."}
 
 Rules:
 - ONE step per response
+- PREFER using 'element_id' from the list over fuzzy description
 - Use element descriptions from provided list
-- For "type" action, extract the value to type from the goal
+- for 'type' action, extract the value to type from the goal
 - Return ONLY JSON, no text"""
 
 
@@ -215,7 +216,7 @@ def plan_next_step(query: str, url: str, current_dom: Dict,
     
     # Filter for interactive or meaningful elements
     candidates_list = []
-    interactive_tags = {'button', 'a', 'input', 'select', 'textarea', 'form', 'label'}
+    interactive_tags = {'button', 'a', 'input', 'select', 'textarea', 'form', 'label', 'div', 'span'}
     
     for node in current_dom.get('nodes', []):
         tag = node.get('tag', '')
@@ -225,30 +226,38 @@ def plan_next_step(query: str, url: str, current_dom: Dict,
         text = (node.get('text') or '').strip()
         aria = (node.get('aria_label') or '').strip()
         attrs = node.get('attributes', {})
+        node_id = node.get('node_id', 'unknown')
         
         # Skip empty non-interactive elements
-        if tag not in interactive_tags and not text and not aria:
+        # Allow divs/spans only if they have text or handler behavior
+        if tag not in ['button', 'a', 'input', 'select', 'textarea'] and not text and not aria and not attrs.get('role'):
             continue
             
         # Build description
-        parts = [tag]
+        parts = [f"[ID:{node_id}]", tag]
+        
         if aria:
             parts.append(f"aria:{aria[:40]}")
         elif text:
             parts.append(f"'{text[:40]}'")
+            
+        # Add extra attributes for better identification if ID/Text is weak
         if attrs.get('name'):
             parts.append(f"name:{attrs['name'][:30]}")
         if attrs.get('placeholder'):
             parts.append(f"ph:{attrs['placeholder'][:30]}")
         if attrs.get('type'):
             parts.append(f"type:{attrs['type']}")
+        if attrs.get('role'):
+            parts.append(f"role:{attrs['role']}")
+        if attrs.get('href') and tag == 'a':
+            parts.append(f"href:{attrs['href'][:40]}")
         
         desc = " ".join(parts)
         candidates_list.append(desc)
     
-    # Use up to 50 elements to give LLM enough context
-    # (LLama 3.3 70B can handle this easily)
-    context_limit = 50
+    # Use up to 60 elements to give LLM enough context
+    context_limit = 60
     elements_str = "\n".join(candidates_list[:context_limit])
     
     # Build compact history context
@@ -259,14 +268,22 @@ def plan_next_step(query: str, url: str, current_dom: Dict,
         for s in recent:
             action = s.get('step', {}).get('action', '?')
             target = s.get('step', {}).get('target', '')[:20]
-            result = "OK" if s.get('result', {}).get('ok') else "FAIL"
-            history += f"- {action} '{target}' -> {result}\n"
+            result_status = "OK" if s.get('result', {}).get('ok') else "FAIL"
+            reason = s.get('result', {}).get('message', '')
+            
+            # Show more context, especially for warnings
+            if "WARNING" in reason or result_status == "FAIL":
+                 history += f"- {action} '{target}' -> {result_status}: {reason[:100]}\n"
+            else:
+                 history += f"- {action} '{target}' -> {result_status}: {reason[:60]}\n"
     
     user_message = f"Goal:{query}\nURL:{url}\nEls:\n{elements_str}{history}\nNext (JSON, include 'value' if typing):"
 
     try:
         response = client.chat.completions.create(
+            # User requested high quality model (gpt-oss-120b equiv -> llama-3.3-70b)
             model="llama-3.3-70b-versatile",  # Fast model
+
             messages=[
                 {"role": "system", "content": SINGLE_STEP_SYSTEM_PROMPT},
                 {"role": "user", "content": user_message}
